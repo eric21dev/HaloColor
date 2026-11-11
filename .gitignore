@@ -1,0 +1,26 @@
+# SwiftPM
+.build/
+.swiftpm/
+# Package.resolved IS committed — halo pins `sill` by url + SemVer, so the
+# lockfile gives reproducible builds and lets dependabot bump it.
+*.xcodeproj/
+*.xcworkspace/
+
+# macOS
+.DS_Store
+*.swp
+
+# App bundles produced by local build scripts (AppIcon.icns IS committed)
+*.app/
+
+# Code signing (written by ./setup-signing-cert.sh)
+.signing-id
+
+# Upstream Halo automation and notes that are not used by Halo Color
+.github/
+CLAUDE.md
+docs/
+glyph.toml
+README-HaloColor.md
+run.sh
+stop.sh
