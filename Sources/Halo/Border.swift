@@ -350,7 +350,12 @@ final class RingView: NSView {
     override var isFlipped: Bool { false }
 
     override func draw(_ dirtyRect: NSRect) {
-        let rect = RingGeometry.ringRect(in: bounds, pad: cfg.pad)
+        // NSBezierPath strokes are centred on their path. Move that path
+        // inward by half the line width so the visible outer edge sits at
+        // exactly the requested distance from the window frame.
+        let now = CACurrentMediaTime()
+        let style = fx.sample(at: now)
+        let rect = RingGeometry.ringRect(in: bounds, pad: cfg.pad - style.width / 2)
         guard rect.width > 0, rect.height > 0 else { return }
         let radius: CGFloat
         switch cfg.borderStyle {
@@ -360,8 +365,6 @@ final class RingView: NSView {
         let path = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
         // ONE wall-clock sample for the whole frame: the border color/width and
         // the pets below walk on the exact same `now` (the "one clock").
-        let now = CACurrentMediaTime()
-        let style = fx.sample(at: now)
         path.lineWidth = style.width
         if cfg.borderStyle == "dashed" {
             let dash: [CGFloat] = [max(8, style.width * 4), max(5, style.width * 2)]

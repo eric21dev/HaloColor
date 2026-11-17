@@ -38,7 +38,7 @@ public struct HaloConfig: Sendable {
 
     // --- halo-specific geometry / scope ---
     public var cornerRadius: CGFloat = 10
-    public var pad: CGFloat         = 4            // gap window edge → ring
+    public var pad: CGFloat         = 0            // gap window edge → visible ring
     public var minSize: CGFloat     = 80          // ignore tiny popups
     /// `[exclude].apps` — bundle-id globs (family-shared shape; wand's
     /// grammar: `*` / `?`, e.g. "com.apple.finder", "*chrome*").

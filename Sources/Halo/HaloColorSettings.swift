@@ -228,7 +228,7 @@ private struct HaloColorSettingsView: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 12)
                     .fill(Color.black.opacity(0.55))
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: 10)
                     .fill(Color(white: 0.16))
                     .padding(18)
                 previewRing(style: borderStyle, color: Self.color(from: previewHex), width: ringWidth)
@@ -296,7 +296,7 @@ private struct HaloColorSettingsView: View {
 
     private func previewRing(style: String, color: Color, width: Double) -> some View {
         Canvas { context, size in
-            let inset = CGFloat(width) / 2 + 5
+            let inset = CGFloat(width) / 2
             let rect = CGRect(x: inset, y: inset, width: size.width - inset * 2, height: size.height - inset * 2)
             let radius: CGFloat = style == "square" ? 0 : 10
             let path = Path(roundedRect: rect, cornerRadius: radius)

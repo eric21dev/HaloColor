@@ -87,8 +87,8 @@
           "type" : "number"
         },
         "pad" : {
-          "default" : 4,
-          "description" : "Gap between the window edge and the ring (points).",
+          "default" : 0,
+          "description" : "Gap between the window edge and the visible ring (points).",
           "minimum" : 0,
           "type" : "number"
         },
