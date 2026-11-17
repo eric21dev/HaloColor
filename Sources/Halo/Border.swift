@@ -231,6 +231,18 @@ final class BorderController {
         let (wid, pid) = (front.id, front.ownerPID)
         let focusedApp = NSRunningApplication(processIdentifier: pid)
         let bundleID = focusedApp?.bundleIdentifier
+        if let bundleID,
+           !AppColorRegistry.contains(bundleID: bundleID, in: cfg.appColorEntries) {
+            do {
+                if let hex = try AppColorRegistry.registerIfNeeded(bundleID: bundleID) {
+                    Log.line("registered \(bundleID) with \(hex)")
+                    applyConfig(HaloConfig.load())
+                    lastConfigMtime = Self.configMtime()
+                }
+            } catch {
+                Log.line("could not register \(bundleID): \(error.localizedDescription)")
+            }
+        }
         // Always resolve the app color, including the global fallback when
         // the app-color list is empty or this app has no entry.
         fx.baseColor = NSColor(cfg.color(for: bundleID))

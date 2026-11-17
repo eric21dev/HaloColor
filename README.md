@@ -8,14 +8,14 @@ Halo Color es una aplicación de barra de menús basada en [Halo](https://github
 
 | Opción | Qué hace |
 | --- | --- |
-| Colores por app | Añade una aplicación, elige un color rápido o usa el selector y el valor hexadecimal. |
+| Colores por app | Las apps se registran al enfocarlas por primera vez con un color distinto. Puedes cambiarlo con un color rápido, el selector o un valor hexadecimal. |
 | Borde | Escoge entre redondeado, recto, guiones y puntos; ajusta grosor y glow. |
 | Efecto | Elige ninguno, Pac-Man, fantasma, chispa o cometa. El efecto recorre el borde sin sustituir el color asignado. |
 | Cambio de foco | Destello, nombre de la app durante dos segundos, sacudida opcional y sonido del sistema. |
 | Ventanas sin foco | Controla con un deslizador cuánto se oscurecen. |
 | Inicio de sesión | Activa o desactiva el arranque automático. |
 
-La ventana de ajustes tiene vistas previas interactivas del borde y el efecto. Puedes ver el color de respaldo o el de cualquier app de tu lista. La propia ventana de ajustes también recibe el borde mientras Halo Color está activo.
+La ventana de ajustes tiene vistas previas interactivas del borde y el efecto. Puedes ver el color de respaldo o el de cualquier app de tu lista. El menú de la barra muestra todas las apps registradas con su color; pulsa una para abrir directamente su edición. La propia ventana de ajustes también recibe el borde mientras Halo Color está activo.
 
 ## Requisitos
 
@@ -39,8 +39,8 @@ El paquete compilado localmente usa una firma ad hoc. macOS puede pedirte confir
 ## Uso
 
 1. Abre **Colores por app…** desde la barra de menús.
-2. Pulsa **Añadir app…** y selecciona un archivo `.app`.
-3. Escoge un color rápido o usa el selector. Puedes cambiar también el color de respaldo.
+2. Enfoca cualquier app nueva: Halo Color la añadirá con un color libre. También puedes usar **Añadir app…** y seleccionar un archivo `.app`.
+3. Abre **Apps registradas** en el menú de la barra y pulsa una app para cambiar su color. En Ajustes puedes elegir un color rápido o usar el selector. También puedes cambiar el color de respaldo.
 4. Prueba los estilos y efectos en la vista previa. Los cambios se aplican sin botón de guardar.
 
 Los colores se asocian al identificador de paquete de cada aplicación. Si una app no tiene color asignado, usa el color de respaldo. Halo Color lee y actualiza `~/.config/halo/config.toml`, de modo que puedes editar la configuración también a mano:

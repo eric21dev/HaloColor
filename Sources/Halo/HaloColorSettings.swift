@@ -29,10 +29,19 @@ final class HaloColorSettingsWindow: NSWindowController {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func show() {
+    func show(bundleID: String? = nil) {
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: AppColorRegistry.didChange, object: nil)
+        }
+        if let bundleID {
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: AppColorRegistry.editRequested,
+                                                object: nil, userInfo: ["bundleID": bundleID])
+            }
+        }
     }
 }
 
@@ -41,6 +50,7 @@ private struct HaloColorSettingsView: View {
     @State private var rows: [AppColorRow] = Self.loadRows()
     @State private var fallbackColor: String = Self.loadFallbackColor()
     @State private var previewBundleID: String = ""
+    @State private var selectedBundleID: String = ""
     @State private var glowEnabled: Bool = HaloConfig.load().glow
     @State private var ringWidth: Double = Double(HaloConfig.load().width)
     @State private var borderStyle: String = Self.initialBorderStyle()
@@ -60,7 +70,7 @@ private struct HaloColorSettingsView: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text("Colores por aplicación")
                     .font(.title2.weight(.semibold))
-                Text("El color se muestra en el borde de la ventana enfocada. Las apps sin asignación usan el color global de Halo.")
+                Text("Las apps nuevas se registran al enfocarlas por primera vez, cada una con un color diferente. Puedes cambiarlo aquí cuando quieras.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -168,13 +178,20 @@ private struct HaloColorSettingsView: View {
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
 
-            ScrollView {
-                VStack(spacing: 8) {
-                    ForEach($rows) { row in appRow(row) }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 8) {
+                        ForEach($rows) { row in appRow(row).id(row.wrappedValue.id) }
+                    }
+                    .padding(.vertical, 2)
                 }
-                .padding(.vertical, 2)
+                .frame(minHeight: 120, maxHeight: 280)
+                .onChange(of: selectedBundleID) {
+                    if let row = rows.first(where: { $0.bundleID == selectedBundleID }) {
+                        withAnimation { proxy.scrollTo(row.id, anchor: .center) }
+                    }
+                }
             }
-            .frame(minHeight: 120, maxHeight: 280)
 
             HStack {
                 Button {
@@ -210,6 +227,15 @@ private struct HaloColorSettingsView: View {
         .onChange(of: dimAmount) { scheduleSave() }
         .onAppear {
             if HaloConfig.load().borderStyle == "capsule" { scheduleSave() }
+            syncRowsFromDisk()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AppColorRegistry.didChange)) { _ in
+            syncRowsFromDisk()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AppColorRegistry.editRequested)) { note in
+            guard let id = note.userInfo?["bundleID"] as? String else { return }
+            previewBundleID = id
+            selectedBundleID = id
         }
     }
 
@@ -378,7 +404,9 @@ private struct HaloColorSettingsView: View {
             .padding(.leading, 46)
         }
         .padding(10)
-        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
+        .background(selectedBundleID == row.wrappedValue.bundleID
+                    ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.1),
+                    in: RoundedRectangle(cornerRadius: 10))
     }
 
     private func quickColorButton(_ hex: String, row: Binding<AppColorRow>) -> some View {
@@ -451,14 +479,17 @@ private struct HaloColorSettingsView: View {
             message = "No pude leer el identificador de esa app."
             return
         }
-        guard !rows.contains(where: { $0.bundleID == bundleID }) else {
+        guard !rows.contains(where: {
+            $0.bundleID.caseInsensitiveCompare(bundleID) == .orderedSame
+        }) else {
             message = "Esa app ya está en la lista."
             return
         }
         let name = (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
             ?? (bundle.object(forInfoDictionaryKey: "CFBundleName") as? String)
             ?? url.deletingPathExtension().lastPathComponent
-        rows.append(AppColorRow(name: name, bundleID: bundleID, hex: "#28A9FF", appPath: url.path))
+        let hex = AppColorRegistry.suggestedColor(usedHexes: rows.map(\.hex) + [fallbackColor])
+        rows.append(AppColorRow(name: name, bundleID: bundleID, hex: hex, appPath: url.path))
         message = "Añadida: \(name)"
     }
 
@@ -473,7 +504,9 @@ private struct HaloColorSettingsView: View {
             message = "Revisa el identificador y el color de cada fila. Usa #RRGGBB."
             return
         }
-        guard Set(rows.map { $0.bundleID.trimmingCharacters(in: .whitespacesAndNewlines) }).count == rows.count else {
+        guard Set(rows.map {
+            $0.bundleID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        }).count == rows.count else {
             message = "Hay aplicaciones repetidas en la lista."
             return
         }
@@ -521,9 +554,20 @@ private struct HaloColorSettingsView: View {
             let bundleID = String(entry[..<separator]).trimmingCharacters(in: .whitespaces)
             let hex = String(entry[entry.index(after: separator)...]).trimmingCharacters(in: .whitespaces)
             guard !bundleID.isEmpty, let normalized = normalizedHex(hex) else { return nil }
+            let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first
             let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
-            let name = url?.deletingPathExtension().lastPathComponent ?? bundleID
+                ?? running?.bundleURL
+            let name = running?.localizedName
+                ?? url?.deletingPathExtension().lastPathComponent ?? bundleID
             return AppColorRow(name: name, bundleID: bundleID, hex: normalized, appPath: url?.path)
+        }
+    }
+
+    private func syncRowsFromDisk() {
+        for row in Self.loadRows() where !rows.contains(where: {
+            $0.bundleID.caseInsensitiveCompare(row.bundleID) == .orderedSame
+        }) {
+            rows.append(row)
         }
     }
 
@@ -569,20 +613,7 @@ private struct HaloColorSettingsView: View {
         try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(),
                                                 withIntermediateDirectories: true)
         var source = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
-        let section = "[app-colors]\napps = [\n"
-            + entries.map { "  \"\($0)\"," }.joined(separator: "\n")
-            + (entries.isEmpty ? "" : "\n")
-            + "]\n"
-        let pattern = "(?ms)^\\[app-colors\\]\\s*\\n.*?(?=^\\[|\\z)"
-        let regex = try NSRegularExpression(pattern: pattern)
-        let range = NSRange(source.startIndex..., in: source)
-        if let match = regex.firstMatch(in: source, range: range),
-           let swiftRange = Range(match.range, in: source) {
-            source.replaceSubrange(swiftRange, with: section + "\n")
-        } else {
-            if !source.isEmpty && !source.hasSuffix("\n") { source += "\n" }
-            source += "\n" + section
-        }
+        try AppColorRegistry.replaceEntries(entries, in: &source)
         try upsert(section: "border", key: "color", value: "\"\(fallbackColor)\"", source: &source)
         try upsert(section: "border", key: "effect", value: "\"off\"", source: &source)
         try upsert(section: "border", key: "glow", value: String(glow), source: &source)

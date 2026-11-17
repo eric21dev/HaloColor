@@ -90,7 +90,7 @@ enum HaloApp {
 // to whatever window is frontmost. Config is owned by BorderController
 // (loaded there, hot-reloaded there); the delegate only wires the seam.
 @MainActor
-final class HaloDelegate: NSObject, NSApplicationDelegate {
+final class HaloDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let events = WindowServerEvents()
     private var border: BorderController!
     private var statusItem: NSStatusItem?
@@ -127,22 +127,74 @@ final class HaloDelegate: NSObject, NSApplicationDelegate {
         item.button?.toolTip = "Halo Color"
 
         let menu = NSMenu()
+        menu.delegate = self
+        item.menu = menu
+        statusItem = item
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
         let settings = NSMenuItem(title: "Colores por app…",
                                   action: #selector(showColorSettings), keyEquivalent: "")
         settings.target = self
         menu.addItem(settings)
+
+        let entries = HaloConfig.load().appColorEntries.compactMap { entry -> (String, String)? in
+            guard let separator = entry.firstIndex(of: "=") else { return nil }
+            let id = String(entry[..<separator])
+            let hex = String(entry[entry.index(after: separator)...])
+            return (id, hex)
+        }
+        let apps = NSMenuItem(title: "Apps registradas (\(entries.count))",
+                              action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        for (id, hex) in entries {
+            let running = NSRunningApplication.runningApplications(withBundleIdentifier: id).first
+            let name = running?.localizedName
+                ?? NSWorkspace.shared.urlForApplication(withBundleIdentifier: id)?
+                    .deletingPathExtension().lastPathComponent ?? id
+            let item = NSMenuItem(title: "\(name)  ·  \(hex)",
+                                  action: #selector(editAppColor(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = id
+            item.image = Self.colorSwatch(hex)
+            submenu.addItem(item)
+        }
+        if entries.isEmpty {
+            let empty = NSMenuItem(title: "Se añadirán al enfocarlas", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            submenu.addItem(empty)
+        }
+        menu.setSubmenu(submenu, for: apps)
+        menu.addItem(apps)
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Salir de Halo Color",
                               action: #selector(quitApp), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
-        item.menu = menu
-        statusItem = item
+    }
+
+    private static func colorSwatch(_ hex: String) -> NSImage? {
+        guard hex.hasPrefix("#"), let rgb = Int(hex.dropFirst(), radix: 16) else { return nil }
+        let color = NSColor(srgbRed: CGFloat((rgb >> 16) & 255) / 255,
+                            green: CGFloat((rgb >> 8) & 255) / 255,
+                            blue: CGFloat(rgb & 255) / 255, alpha: 1)
+        return NSImage(size: NSSize(width: 15, height: 15), flipped: false) { rect in
+            color.setFill()
+            NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1)).fill()
+            return true
+        }
     }
 
     @objc private func showColorSettings() {
         if settingsWindow == nil { settingsWindow = HaloColorSettingsWindow() }
         settingsWindow?.show()
+    }
+
+    @objc private func editAppColor(_ item: NSMenuItem) {
+        guard let bundleID = item.representedObject as? String else { return }
+        if settingsWindow == nil { settingsWindow = HaloColorSettingsWindow() }
+        settingsWindow?.show(bundleID: bundleID)
     }
 
     @objc private func quitApp() { NSApp.terminate(nil) }
