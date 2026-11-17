@@ -4,6 +4,15 @@ import QuartzCore   // CACurrentMediaTime — line-pet animation clock
 import Effects      // sill: drawLinePets / LinePet / NSColor(HexColor)
 import HaloCore
 
+/// AppKit normally keeps windows below the menu bar. A tracking overlay
+/// needs its full frame, including the glow margin above a target window;
+/// otherwise AppKit shifts the whole ring down while keeping its size.
+private final class TrackingOverlayWindow: NSWindow {
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        frameRect
+    }
+}
+
 // The ring overlay + its driver.
 //
 // BorderController resolves the frontmost third-party window (front-to-back
@@ -29,8 +38,8 @@ final class BorderController {
     private var cfg: HaloConfig
     private let events: WindowServerEvents
     private var safetyNet: Timer?
-    private let overlay = NSWindow(contentRect: .zero, styleMask: [.borderless],
-                                   backing: .buffered, defer: true)
+    private let overlay = TrackingOverlayWindow(contentRect: .zero, styleMask: [.borderless],
+                                                backing: .buffered, defer: true)
     private let fx = BorderFX()
     private let shake = WindowShake()
     private let focusSound = FocusSound()
@@ -284,8 +293,8 @@ final class BorderController {
     }
 
     private func makeDimOverlay(for windowID: UInt32) -> NSWindow {
-        let dim = NSWindow(contentRect: .zero, styleMask: [.borderless],
-                           backing: .buffered, defer: false)
+        let dim = TrackingOverlayWindow(contentRect: .zero, styleMask: [.borderless],
+                                        backing: .buffered, defer: false)
         dim.isOpaque = false
         dim.backgroundColor = .clear
         dim.ignoresMouseEvents = true
