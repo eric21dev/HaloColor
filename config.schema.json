@@ -214,6 +214,11 @@
       "additionalProperties" : false,
       "description" : "Focus-sound: play a short audio cue on focus change (no permission).",
       "properties" : {
+        "enabled" : {
+          "default" : true,
+          "description" : "Enable focus sound. False keeps the selected file and volume for later.",
+          "type" : "boolean"
+        },
         "sound" : {
           "default" : "",
           "description" : "Audio file path; empty = off. e.g. \"~/.local/share/sounds/window_focused.wav\".",

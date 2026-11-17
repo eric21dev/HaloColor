@@ -95,6 +95,7 @@ shake-duration-ms = 250 # total shake duration
 # Latest-wins — a fast alt-tab burst never stacks; only the newest plays.
 #   sound = "~/.local/share/sounds/window_focused.wav"
 sound = ""         # audio file path; empty = off
+enabled = true     # switch off without losing the selected sound
 sound-volume = 0.3 # 0.0 … 1.0
 
 [pets]

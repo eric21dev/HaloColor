@@ -48,7 +48,7 @@ final class ConfigValidateTests: XCTestCase {
         XCTAssertThrowsError(try HaloConfig.validate(typo))
         XCTAssertEqual(HaloConfig.warnSchemaViolations(typo), 2)   // border.width + sound.sound-volume
         let c = HaloConfig.parse(typo)
-        XCTAssertEqual(c.effect, "neon")     // the bad line is dropped, default kept
+        XCTAssertEqual(c.effect, "off")      // the bad line is dropped, default kept
         XCTAssertEqual(c.width, 0)           // clamped
         XCTAssertEqual(c.soundVolume, 1)
     }

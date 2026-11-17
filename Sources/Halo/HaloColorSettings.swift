@@ -58,7 +58,10 @@ private struct HaloColorSettingsView: View {
     @State private var focusFlash: Bool = HaloConfig.load().flashOnFocus
     @State private var showFocusedAppName: Bool = HaloConfig.load().showAppNameOnFocus
     @State private var shakeOnFocus: Bool = HaloConfig.load().shake
+    @State private var soundEnabled: Bool = HaloConfig.load().soundEnabled && !HaloConfig.load().sound.isEmpty
     @State private var soundPath: String = Self.initialSoundPath()
+    @State private var soundVolume: Double = HaloConfig.load().soundVolume
+    @State private var soundPreview: NSSound?
     @State private var dimAmount: Double = HaloConfig.load().dimInactive
     @State private var launchAtLogin: Bool = SMAppService.mainApp.status == .enabled
     @State private var message = "Los cambios se aplican automáticamente."
@@ -140,18 +143,34 @@ private struct HaloColorSettingsView: View {
                             .font(.caption)
                         }
                     }
+                    Toggle("Sonido al cambiar de ventana", isOn: $soundEnabled)
+                        .disabled(soundPath.isEmpty)
                     HStack(spacing: 10) {
-                        Picker("Sonido al cambiar", selection: $soundPath) {
-                            Text("Sin sonido").tag("")
+                        Picker("Sonido", selection: $soundPath) {
                             ForEach(Self.systemSounds, id: \.path) { sound in
                                 Text(sound.name).tag(sound.path)
+                            }
+                            if !soundPath.isEmpty && !Self.systemSounds.contains(where: { $0.path == soundPath }) {
+                                Text("Personalizado · \(URL(fileURLWithPath: soundPath).lastPathComponent)")
+                                    .tag(soundPath)
                             }
                         }
                         .frame(width: 300)
                         Button("▶︎") { previewSound() }
-                            .disabled(soundPath.isEmpty)
+                            .disabled(!soundEnabled || soundPath.isEmpty)
                             .help("Escuchar sonido")
                     }
+                    .disabled(!soundEnabled)
+                    HStack(spacing: 12) {
+                        Text("Volumen del sonido")
+                            .frame(width: 190, alignment: .leading)
+                        Slider(value: $soundVolume, in: 0...1, step: 0.05)
+                            .frame(maxWidth: 260)
+                        Text("\(Int((soundVolume * 100).rounded()))%")
+                            .font(.caption.monospaced())
+                            .frame(width: 42, alignment: .trailing)
+                    }
+                    .disabled(!soundEnabled)
                     HStack(spacing: 12) {
                         Text("Oscurecer apps sin foco")
                             .frame(width: 190, alignment: .leading)
@@ -223,7 +242,19 @@ private struct HaloColorSettingsView: View {
         .onChange(of: focusFlash) { scheduleSave() }
         .onChange(of: showFocusedAppName) { scheduleSave() }
         .onChange(of: shakeOnFocus) { scheduleSave() }
-        .onChange(of: soundPath) { scheduleSave() }
+        .onChange(of: soundEnabled) {
+            if !soundEnabled { soundPreview?.stop() }
+            scheduleSave()
+        }
+        .onChange(of: soundPath) {
+            soundPreview?.stop()
+            soundPreview = nil
+            scheduleSave()
+        }
+        .onChange(of: soundVolume) {
+            soundPreview?.volume = Float(soundVolume)
+            scheduleSave()
+        }
         .onChange(of: dimAmount) { scheduleSave() }
         .onAppear {
             if HaloConfig.load().borderStyle == "capsule" { scheduleSave() }
@@ -460,8 +491,11 @@ private struct HaloColorSettingsView: View {
     }
 
     private func previewSound() {
-        guard !soundPath.isEmpty else { return }
-        NSSound(contentsOfFile: soundPath, byReference: false)?.play()
+        guard soundEnabled, !soundPath.isEmpty else { return }
+        soundPreview?.stop()
+        soundPreview = NSSound(contentsOfFile: soundPath, byReference: false)
+        soundPreview?.volume = Float(soundVolume)
+        soundPreview?.play()
     }
 
     private func chooseApplication() {
@@ -517,7 +551,8 @@ private struct HaloColorSettingsView: View {
             }
             try Self.write(entries: cleaned, fallbackColor: fallback,
                            glow: glowEnabled, width: ringWidth, borderStyle: borderStyle,
-                           focusFlash: focusFlash, shake: shakeOnFocus, sound: soundPath,
+                           focusFlash: focusFlash, shake: shakeOnFocus,
+                           sound: soundPath, soundEnabled: soundEnabled, soundVolume: soundVolume,
                            showFocusedAppName: showFocusedAppName,
                            dimAmount: dimAmount,
                            orbitEffect: orbitEffect)
@@ -592,7 +627,9 @@ private struct HaloColorSettingsView: View {
 
     private static func initialSoundPath() -> String {
         let configured = HaloConfig.load().sound
-        return systemSounds.contains(where: { $0.path == configured }) ? configured : ""
+        return configured.isEmpty
+            ? (systemSounds.first(where: { $0.name == "Glass" })?.path ?? systemSounds.first?.path ?? "")
+            : configured
     }
 
     private static func initialOrbitEffect() -> String {
@@ -606,6 +643,7 @@ private struct HaloColorSettingsView: View {
     private static func write(entries: [String], fallbackColor: String,
                               glow: Bool, width: Double, borderStyle: String,
                               focusFlash: Bool, shake: Bool, sound: String,
+                              soundEnabled: Bool, soundVolume: Double,
                               showFocusedAppName: Bool,
                               dimAmount: Double, orbitEffect: String) throws {
         let path = HaloConfig.configFilePath
@@ -628,7 +666,8 @@ private struct HaloColorSettingsView: View {
         let escapedSound = sound.replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         try upsert(section: "sound", key: "sound", value: "\"\(escapedSound)\"", source: &source)
-        try upsert(section: "sound", key: "sound-volume", value: "0.3", source: &source)
+        try upsert(section: "sound", key: "enabled", value: String(soundEnabled), source: &source)
+        try upsert(section: "sound", key: "sound-volume", value: String(soundVolume), source: &source)
         try upsert(section: "dim", key: "amount", value: String(dimAmount), source: &source)
         try upsert(section: "pets", key: "effect", value: "\"\(orbitEffect)\"", source: &source)
         try upsert(section: "pets", key: "line-pets", value: "[]", source: &source)

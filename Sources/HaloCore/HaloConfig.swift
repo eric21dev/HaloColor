@@ -72,6 +72,7 @@ public struct HaloConfig: Sendable {
 
     // --- focus sound (plays an audio cue on focus change — no permission) ---
     public var sound: String       = ""           // audio file path; empty = off
+    public var soundEnabled: Bool = true          // separate toggle; true keeps older configs working
     public var soundVolume: Double  = 0.3          // 0…1
 
     // --- line-pets (arcade sprites orbiting the ring; opt-in, no permission) ---

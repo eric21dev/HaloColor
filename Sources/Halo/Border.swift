@@ -127,7 +127,7 @@ final class BorderController {
         fx.configure(effectName: "off", glow: c.glow, width: c.width,
                      cycleSeconds: c.cycleSeconds, cycleColors: false,
                      minWidth: nil, maxWidth: nil, baseColor: NSColor(c.color))
-        focusSound.configure(path: c.sound, volume: c.soundVolume)
+        focusSound.configure(path: c.soundEnabled ? c.sound : "", volume: c.soundVolume)
         ring.needsDisplay = true
         syncRedraw()
     }

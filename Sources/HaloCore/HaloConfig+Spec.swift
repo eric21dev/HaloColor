@@ -99,6 +99,8 @@ extension HaloConfig {
             .init("sound", doc: "Focus-sound: play a short audio cue on focus change (no permission).", fields: [
                 .str("sound", \.sound, default: "",
                      doc: "Audio file path; empty = off. e.g. \"~/.local/share/sounds/window_focused.wav\"."),
+                .bool("enabled", \.soundEnabled, default: true,
+                      doc: "Enable focus sound. False keeps the selected file and volume for later."),
                 // volume clamps to [0, 1] in `load`.
                 .dblClamp("sound-volume", \.soundVolume, min: 0, max: 1, default: 0.3,
                           doc: "Playback volume, 0.0 … 1.0."),

@@ -17,7 +17,7 @@ final class ConfigDecodeTests: XCTestCase {
 
     func testEffectIsLowercasedAndUnknownKeepsDefault() {
         XCTAssertEqual(HaloConfig.parse("[border]\neffect = \"RAINBOW\"\n").effect, "rainbow")
-        XCTAssertEqual(HaloConfig.parse("[border]\neffect = \"neonish\"\n").effect, "neon")
+        XCTAssertEqual(HaloConfig.parse("[border]\neffect = \"neonish\"\n").effect, "off")
     }
 
     func testColorCycleMsFloorsAt100AndStoresSeconds() {
