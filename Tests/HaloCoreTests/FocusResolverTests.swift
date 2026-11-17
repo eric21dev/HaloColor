@@ -1,8 +1,7 @@
 import XCTest
 @testable import HaloCore
 
-/// The resolve reads z-order: the first front-to-back row that is not
-/// halo's own, not excluded and not tiny wins; nothing sorts afterwards.
+/// The resolve prefers the active app, then reads z-order within it.
 final class FocusResolverTests: XCTestCase {
 
     private func w(_ id: UInt32, pid: Int32, _ size: CGFloat = 400) -> WindowSnapshot {
@@ -13,6 +12,13 @@ final class FocusResolverTests: XCTestCase {
         let pick = FocusResolver.focused(in: [w(1, pid: 100), w(2, pid: 200)],
                                          selfPID: 1, minSize: 80, isExcluded: { _ in false })
         XCTAssertEqual(pick?.id, 1)
+    }
+
+    func testActiveAppWinsWhenWindowOrderLagsAppSwitch() {
+        let pick = FocusResolver.focused(in: [w(1, pid: 100), w(2, pid: 200), w(3, pid: 200)],
+                                         selfPID: 1, minSize: 80, preferredPID: 200,
+                                         isExcluded: { _ in false })
+        XCTAssertEqual(pick?.id, 2)
     }
 
     func testSkipsSelfExcludedAndTiny() {

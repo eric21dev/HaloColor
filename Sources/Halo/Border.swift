@@ -15,7 +15,7 @@ private final class TrackingOverlayWindow: NSWindow {
 
 // The ring overlay + its driver.
 //
-// BorderController resolves the frontmost third-party window (front-to-back
+// BorderController resolves the active app's frontmost window (front-to-back
 // z-order from CGWindowList, skipping halo's own + excluded apps + tiny
 // popups), hugs it with a transparent click-through overlay, and flashes
 // on focus change. Driven by WindowServerEvents: each MOVE/RESIZE re-hugs
@@ -71,7 +71,7 @@ final class BorderController {
         overlay.ignoresMouseEvents = true               // click-through
         overlay.level = .floating
         overlay.hasShadow = false
-        overlay.collectionBehavior = [.stationary, .ignoresCycle, .fullScreenAuxiliary]  // desktop-local (rides the Space slide)
+        overlay.collectionBehavior = [.canJoinAllSpaces, .ignoresCycle, .fullScreenAuxiliary]
         overlay.contentView = ring
 
         applyConfig(config)
@@ -260,7 +260,9 @@ final class BorderController {
                                width: window.frame.width, height: window.frame.height))
         }
         guard let front = settingsSnapshot ?? FocusResolver.focused(
-            in: info, selfPID: selfPID, minSize: cfg.minSize, isExcluded: isExcluded)
+            in: info, selfPID: selfPID, minSize: cfg.minSize,
+            preferredPID: NSWorkspace.shared.frontmostApplication?.processIdentifier,
+            isExcluded: isExcluded)
         else {
             overlay.orderOut(nil)
             clearDimOverlays()
@@ -290,7 +292,15 @@ final class BorderController {
         updateDimOverlays(in: info, focusedPID: pid, screenHeight: screenH)
         overlay.setFrame(RingGeometry.overlayFrame(hugging: front.bounds, screenHeight: screenH),
                          display: true)
-        if !overlay.isVisible { overlay.orderFrontRegardless() }
+        // AppKit can keep a visible overlay attached to the previous Space
+        // after an app switch. Reattach it when the WindowServer says it is
+        // offscreen, and raise it whenever focus moves to a new window.
+        let offscreen = trigger == "poll" && overlay.isVisible && !overlayIsOnScreen()
+        if offscreen {
+            Log.debug("overlay offscreen for wid=\(wid); reattaching")
+            overlay.orderOut(nil)
+        }
+        if !overlay.isVisible || wid != lastWID { overlay.orderFrontRegardless() }
         ring.needsDisplay = true
         if wid != lastWID {
             lastWID = wid
@@ -360,6 +370,15 @@ final class BorderController {
     private func clearDimOverlays() {
         for window in dimOverlays.values { window.orderOut(nil) }
         dimOverlays.removeAll()
+    }
+
+    private func overlayIsOnScreen() -> Bool {
+        let id = UInt32(overlay.windowNumber)
+        guard let rows = CGWindowListCopyWindowInfo([.optionIncludingWindow], id)
+                as? [[String: Any]],
+              let row = rows.first(where: { ($0[kCGWindowNumber as String] as? UInt32) == id }),
+              let onScreen = row[kCGWindowIsOnscreen as String] as? NSNumber else { return false }
+        return onScreen.boolValue
     }
 
     /// `[exclude].apps` check for a candidate's pid. Resolves the bundle

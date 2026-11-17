@@ -16,20 +16,26 @@ public struct WindowSnapshot: Sendable, Equatable {
     }
 }
 
-/// Picks which window the ring should be on. halo never asks the system
-/// "what is focused"; it reads z-order.
+/// Picks which window the ring should be on. WindowServer z-order resolves
+/// windows within an app; the active app PID wins when that order lags a
+/// switch between applications.
 public enum FocusResolver {
-    /// Frontmost window in `windows` that is not owned by `selfPID`, not
-    /// excluded, and at least `minSize` on both axes; nil when none.
+    /// Frontmost eligible window in the active app when present; otherwise
+    /// the first eligible window in `windows`. Returns nil when none.
     /// `isExcluded` is consulted per candidate (the app resolves the pid's
     /// bundle id lazily, so the common no-exclusion case costs nothing).
     public static func focused(in windows: [WindowSnapshot], selfPID: Int32,
-                               minSize: CGFloat,
+                               minSize: CGFloat, preferredPID: Int32? = nil,
                                isExcluded: (Int32) -> Bool) -> WindowSnapshot? {
-        windows.first { w in
+        func eligible(_ w: WindowSnapshot) -> Bool {
             w.ownerPID != selfPID
                 && w.bounds.width >= minSize && w.bounds.height >= minSize
                 && !isExcluded(w.ownerPID)
         }
+        if let preferredPID,
+           let active = windows.first(where: { $0.ownerPID == preferredPID && eligible($0) }) {
+            return active
+        }
+        return windows.first(where: eligible)
     }
 }
