@@ -46,17 +46,17 @@ final class BorderController {
     private let focusSound = FocusSound()
     private let focusedToast = FocusedAppToast()
     private let ring: RingView
+    private let orbit: OrbitView
     private var dimOverlays: [UInt32: NSWindow] = [:]
     private let selfPID = ProcessInfo.processInfo.processIdentifier
     private var lastWID: UInt32 = 0
     private var destroyedWIDs = Set<UInt32>()
     private var didFirstResolve = false
     private var lastConfigMtime: Date?
-    /// The ONE 30 Hz redraw heartbeat — pumps `ring.needsDisplay` while the
-    /// border animates (rainbow / breathing / flash) OR line-pets orbit. Both
-    /// ride a single wall clock in `RingView.draw`; this is just the cadence,
-    /// not an animator (the math is sill's clockless `resolveBorder`).
+    /// The 30 Hz heartbeat redraws moving accents and short focus flashes.
+    /// The static border and its glow stay cached in their own backing layer.
     private var redrawTimer: Timer?
+    private var borderWasAnimating = false
 
     /// The config as last applied (launch or hot-reload).
     var config: HaloConfig { cfg }
@@ -66,13 +66,24 @@ final class BorderController {
         self.cfg = config
         self.events = events
         self.ring = RingView(config: config, fx: fx)
+        self.orbit = OrbitView(config: config, fx: fx)
         overlay.isOpaque = false
         overlay.backgroundColor = .clear
         overlay.ignoresMouseEvents = true               // click-through
         overlay.level = .floating
         overlay.hasShadow = false
         overlay.collectionBehavior = [.canJoinAllSpaces, .ignoresCycle, .fullScreenAuxiliary]
-        overlay.contentView = ring
+        // Keep the glow in its own backing layer. Orbit effects redraw often;
+        // their transparent layer must not re-render the blurred border.
+        let content = NSView(frame: .zero)
+        content.wantsLayer = true
+        ring.wantsLayer = true
+        orbit.wantsLayer = true
+        ring.autoresizingMask = [.width, .height]
+        orbit.autoresizingMask = [.width, .height]
+        content.addSubview(ring)
+        content.addSubview(orbit)
+        overlay.contentView = content
 
         applyConfig(config)
         lastConfigMtime = Self.configMtime()
@@ -118,6 +129,7 @@ final class BorderController {
     private func applyConfig(_ c: HaloConfig) {
         cfg = c
         ring.cfg = c
+        orbit.cfg = c
         if !c.showAppNameOnFocus { focusedToast.hide() }
         shake.amplitude = c.shakeAmplitude
         shake.durationMs = c.shakeDurationMs
@@ -129,13 +141,12 @@ final class BorderController {
                      minWidth: nil, maxWidth: nil, baseColor: NSColor(c.color))
         focusSound.configure(path: c.soundEnabled ? c.sound : "", volume: c.soundVolume)
         ring.needsDisplay = true
+        orbit.needsDisplay = true
         syncRedraw()
     }
 
-    /// Start / stop the 30 Hz redraw heartbeat to match what's animating now
-    /// (border cycle / breath / flash, or line-pets orbiting forever while
-    /// configured). Called whenever the animated state can change: configure,
-    /// focus flash. A static border with no pets parks the timer entirely.
+    /// Start / stop the 30 Hz heartbeat for orbit effects or focus flash.
+    /// A static border parks the timer entirely.
     private func syncRedraw() {
         if fx.animating(at: CACurrentMediaTime()) || hasOrbitEffect {
             startRedraw()
@@ -151,8 +162,13 @@ final class BorderController {
         let t = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                self.ring.needsDisplay = true
-                if !(self.fx.animating(at: CACurrentMediaTime()) || self.hasOrbitEffect) {
+                let borderAnimating = self.fx.animating(at: CACurrentMediaTime())
+                // One final paint restores the resting width/color after a
+                // flash; otherwise the last pulsed frame could stay cached.
+                if borderAnimating || self.borderWasAnimating { self.ring.needsDisplay = true }
+                self.borderWasAnimating = borderAnimating
+                if self.hasOrbitEffect { self.orbit.needsDisplay = true }
+                if !borderAnimating && !self.hasOrbitEffect {
                     self.stopRedraw()
                 }
             }
@@ -290,8 +306,10 @@ final class BorderController {
         fx.baseColor = NSColor(cfg.color(for: bundleID))
         let screenH = NSScreen.screens.first?.frame.height ?? 0      // CG (y-down) → Cocoa (y-up)
         updateDimOverlays(in: info, focusedPID: pid, screenHeight: screenH)
-        overlay.setFrame(RingGeometry.overlayFrame(hugging: front.bounds, screenHeight: screenH),
-                         display: true)
+        let nextFrame = RingGeometry.overlayFrame(hugging: front.bounds, screenHeight: screenH)
+        let frameChanged = overlay.frame != nextFrame
+        let focusChanged = wid != lastWID
+        if frameChanged { overlay.setFrame(nextFrame, display: true) }
         // AppKit can keep a visible overlay attached to the previous Space
         // after an app switch. Reattach it when the WindowServer says it is
         // offscreen, and raise it whenever focus moves to a new window.
@@ -300,9 +318,12 @@ final class BorderController {
             Log.debug("overlay offscreen for wid=\(wid); reattaching")
             overlay.orderOut(nil)
         }
-        if !overlay.isVisible || wid != lastWID { overlay.orderFrontRegardless() }
-        ring.needsDisplay = true
-        if wid != lastWID {
+        if !overlay.isVisible || focusChanged { overlay.orderFrontRegardless() }
+        if frameChanged || focusChanged {
+            ring.needsDisplay = true
+            orbit.needsDisplay = true
+        }
+        if focusChanged {
             lastWID = wid
             Log.debug(String(format: "focus → wid=%u via %@ (resolve %.2fms)", wid, trigger, resolveMs))
             if cfg.showAppNameOnFocus {
@@ -338,13 +359,14 @@ final class BorderController {
             let dim = dimOverlays[window.id] ?? makeDimOverlay(for: window.id)
             if dimOverlays[window.id] == nil { dimOverlays[window.id] = dim }
             if let view = dim.contentView as? DimOverlayView {
-                view.amount = CGFloat(cfg.dimInactive)
+                let amount = CGFloat(cfg.dimInactive)
+                if view.amount != amount { view.amount = amount }
             }
             let frame = CGRect(x: window.bounds.minX,
                                y: screenHeight - window.bounds.maxY,
                                width: window.bounds.width,
                                height: window.bounds.height)
-            dim.setFrame(frame, display: true)
+            if dim.frame != frame { dim.setFrame(frame, display: true) }
             if !dim.isVisible { dim.order(.above, relativeTo: Int(window.id)) }
         }
         let stale = dimOverlays.keys.filter { !wanted.contains($0) }
@@ -444,8 +466,6 @@ final class RingView: NSView {
         default: radius = cfg.cornerRadius
         }
         let path = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
-        // ONE wall-clock sample for the whole frame: the border color/width and
-        // the pets below walk on the exact same `now` (the "one clock").
         path.lineWidth = style.width
         if cfg.borderStyle == "dashed" {
             let dash: [CGFloat] = [max(8, style.width * 4), max(5, style.width * 2)]
@@ -457,8 +477,8 @@ final class RingView: NSView {
         }
         let stroke = style.color
         stroke.setStroke()
-        // Isolate the glow shadow to the ring stroke so it doesn't bloom
-        // under the pets drawn next.
+        // The orbit effect has a separate backing layer, so this expensive
+        // blurred stroke is redrawn only when its style or frame changes.
         NSGraphicsContext.saveGraphicsState()
         if fx.glowEnabled {
             let shadow = NSShadow()
@@ -468,6 +488,24 @@ final class RingView: NSView {
         }
         path.stroke()
         NSGraphicsContext.restoreGraphicsState()
+    }
+}
+
+/// Moving accents sit above the static ring in a separate backing layer.
+/// Redrawing this view cannot invalidate the ring's expensive glow shadow.
+private final class OrbitView: NSView {
+    var cfg: HaloConfig
+    private let fx: BorderFX
+
+    init(config: HaloConfig, fx: BorderFX) { self.cfg = config; self.fx = fx; super.init(frame: .zero) }
+    required init?(coder: NSCoder) { fatalError("not used") }
+    override var isFlipped: Bool { false }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let now = CACurrentMediaTime()
+        let style = fx.sample(at: now)
+        let rect = RingGeometry.ringRect(in: bounds, pad: cfg.pad - style.width / 2)
+        guard rect.width > 0, rect.height > 0 else { return }
 
         // Arcade pets orbiting the ring (opt-in via `line-pets`). They ride
         // the same `rect` the ring strokes, so they walk ON the border. The
@@ -485,7 +523,7 @@ final class RingView: NSView {
                          speed: PetOrbit.speed(around: rect, lapSeconds: cfg.petLapSeconds))
         }
         if cfg.orbitEffect == "spark" || cfg.orbitEffect == "comet" {
-            drawOrbitAccent(on: rect, now: now, color: stroke)
+            drawOrbitAccent(on: rect, now: now, color: style.color)
         }
     }
 
