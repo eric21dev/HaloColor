@@ -111,7 +111,9 @@ final class HaloDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 + "Privacy & Security → Accessibility, then restart (or set shake = false)")
         }
 
-        events.onEvent = { [weak self] event in self?.border.onEvent(event) }
+        events.onEvent = { [weak self] event, windowID in
+            self?.border.onEvent(event, windowID: windowID)
+        }
 
         guard events.start() else {
             Log.line("‼️ could not start the window-event seam — exiting")

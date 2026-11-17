@@ -38,6 +38,7 @@ final class BorderController {
     private var cfg: HaloConfig
     private let events: WindowServerEvents
     private var safetyNet: Timer?
+    private var closeWatch: Timer?
     private let overlay = TrackingOverlayWindow(contentRect: .zero, styleMask: [.borderless],
                                                 backing: .buffered, defer: true)
     private let fx = BorderFX()
@@ -48,6 +49,7 @@ final class BorderController {
     private var dimOverlays: [UInt32: NSWindow] = [:]
     private let selfPID = ProcessInfo.processInfo.processIdentifier
     private var lastWID: UInt32 = 0
+    private var destroyedWIDs = Set<UInt32>()
     private var didFirstResolve = false
     private var lastConfigMtime: Date?
     /// The ONE 30 Hz redraw heartbeat — pumps `ring.needsDisplay` while the
@@ -88,6 +90,27 @@ final class BorderController {
         }
         RunLoop.main.add(timer, forMode: .common)
         safetyNet = timer
+        // macOS keeps a closing window in the on-screen list during its fade
+        // and may deliver DESTROY well afterward. A cheap, one-window query
+        // catches the fade without making every full resolve run at 20 Hz.
+        let watch = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.watchFocusedWindow() }
+        }
+        RunLoop.main.add(watch, forMode: .common)
+        closeWatch = watch
+    }
+
+    private func watchFocusedWindow() {
+        guard lastWID != 0, overlay.isVisible,
+              let rows = CGWindowListCopyWindowInfo([.optionIncludingWindow], lastWID)
+                  as? [[String: Any]] else { return }
+        let row = rows.first { ($0[kCGWindowNumber as String] as? UInt32) == lastWID }
+        let alpha = (row?[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1
+        let onScreen = (row?[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue ?? true
+        guard row == nil || alpha < 0.5 || !onScreen else { return }
+        Log.debug("focused window fading/closed: wid=\(lastWID) alpha=\(alpha)")
+        overlay.orderOut(nil)
+        update(trigger: "close-watch", resubscribe: false)
     }
 
     /// (Re)apply a config to fx / shake / ring. One path for both launch
@@ -173,15 +196,26 @@ final class BorderController {
     }
 
     /// A window-server event arrived (fired on the main thread).
-    func onEvent(_ event: UInt32) {
+    func onEvent(_ event: UInt32, windowID: UInt32?) {
         if event != WindowServerEvents.MOVE { Log.debug("evt-\(event)") }
-        update(trigger: "event-\(event)", resubscribe: event == WindowServerEvents.FRONT)
+        if event == WindowServerEvents.DESTROY, let windowID {
+            destroyedWIDs.insert(windowID)
+            if windowID == lastWID {
+                // The CG window list can retain a closing window for its
+                // animation. Retire its ring as soon as SkyLight destroys it.
+                overlay.orderOut(nil)
+                lastWID = 0
+            }
+        }
+        update(trigger: "event-\(event)",
+               resubscribe: event == WindowServerEvents.FRONT || event == WindowServerEvents.DESTROY)
         // 1508 (app-switch) / 808 (same-app window-switch) fire BEFORE the
         // window server's z-order settles, so the immediate re-resolve reads
         // the OLD front and misses (then the 0.4s poll catches it — late).
         // Re-resolve a few times as it commits; the first that sees the new
         // front logs + flashes. (JankyBorders defers ~50ms for this.)
-        if event == WindowServerEvents.FRONT || event == WindowServerEvents.REORDER {
+        if event == WindowServerEvents.FRONT || event == WindowServerEvents.REORDER ||
+           event == WindowServerEvents.DESTROY {
             for ms in [16, 40, 80] {
                 DispatchQueue.main.asyncAfter(deadline: .now() + Double(ms) / 1000) { [weak self] in
                     MainActor.assumeIsolated {
@@ -200,7 +234,13 @@ final class BorderController {
     /// per-window (re)subscription AND the focused-window resolve.
     private func update(trigger: String, resubscribe: Bool) {
         let t0 = ProcessInfo.processInfo.systemUptime
-        let info = windowInfo()
+        var info = windowInfo()
+        // A destroyed window may remain in the on-screen list briefly while
+        // macOS plays its close animation. Exclude it until the list drops it.
+        if !destroyedWIDs.isEmpty {
+            destroyedWIDs.formIntersection(info.map(\.id))
+            info.removeAll { destroyedWIDs.contains($0.id) }
+        }
         let resolveMs = (ProcessInfo.processInfo.systemUptime - t0) * 1000
         if trigger == "poll" { Log.debug(String(format: "resolve %.2fms (%d windows)", resolveMs, info.count)) }
 
@@ -339,6 +379,7 @@ final class BorderController {
         guard let raw = CGWindowListCopyWindowInfo(opts, kCGNullWindowID) as? [[String: Any]] else { return [] }
         return raw.compactMap { d in
             guard (d[kCGWindowLayer as String] as? Int ?? 0) == 0,
+                  ((d[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1) >= 0.5,
                   let pid = d[kCGWindowOwnerPID as String] as? Int32,
                   let wid = d[kCGWindowNumber as String] as? UInt32,
                   let b = d[kCGWindowBounds as String] as? [String: CGFloat],

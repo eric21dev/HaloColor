@@ -2,7 +2,8 @@
 //
 // Delivers window MOVE / RESIZE / REORDER / FRONT-change events at
 // ~5ms (median 4-6ms, no long tail), which is what lets the border hug
-// a window smoothly while you drag it.
+// a window smoothly while you drag it. DESTROY is also observed, but macOS
+// can defer it until well after a window begins its close animation.
 //
 // THE NON-OBVIOUS PART (verified empirically before this code existed):
 // you CANNOT receive these on the process's MAIN SkyLight connection
@@ -58,11 +59,14 @@ private let fnNextEvent  = slSym("SLEventCreateNextEvent").map { unsafeBitCast($
 // there is no second thread for the compiler to protect against.
 nonisolated(unsafe) private weak var liveSubscriber: WindowServerEvents?
 nonisolated(unsafe) private var pumpCID: Int32 = 0
+private let destroyEventCode: UInt32 = 804
 
 private func connectionNotify(_ event: UInt32, _ data: UnsafeMutableRawPointer?,
                               _ len: Int, _ ctx: UnsafeMutableRawPointer?, _ cid: Int32) {
     // Dispatched from the drain pump, i.e. from the main run loop.
-    MainActor.assumeIsolated { liveSubscriber?.onEvent?(event) }
+    let windowID = event == destroyEventCode && len >= MemoryLayout<UInt32>.size
+        ? data?.loadUnaligned(as: UInt32.self) : nil
+    MainActor.assumeIsolated { liveSubscriber?.onEvent?(event, windowID) }
 }
 
 private let drainPump: CFMachPortCallBack = { _, _, _, _ in
@@ -72,15 +76,16 @@ private let drainPump: CFMachPortCallBack = { _, _, _, _ in
 
 @MainActor
 final class WindowServerEvents {
+    static let DESTROY: UInt32 = destroyEventCode
     static let MOVE:    UInt32 = 806
     static let RESIZE:  UInt32 = 807
     static let REORDER: UInt32 = 808
     static let FRONT:   UInt32 = 1508
-    private static let subscribed: [UInt32] = [MOVE, RESIZE, REORDER, FRONT]
+    private static let subscribed: [UInt32] = [DESTROY, MOVE, RESIZE, REORDER, FRONT]
 
     private(set) var cid: Int32 = 0
     /// Fired on the main thread for every subscribed event.
-    var onEvent: ((UInt32) -> Void)?
+    var onEvent: ((UInt32, UInt32?) -> Void)?
 
     @discardableResult
     func start() -> Bool {
